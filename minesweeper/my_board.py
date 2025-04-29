@@ -4,6 +4,7 @@ import random
 import pygame as pg
 
 from board import Board
+from utils import load_image
 
 CLOSED = -1
 MINE = 10
@@ -29,12 +30,13 @@ class Minesweeper(Board):
     """
 
     CELL_COLOR = pg.Color('#818181')
+    DOUBLE_CLICK_DELAY = 500
 
-    def __init__(self, width: int, height: int, count_mines: int):
-        super().__init__(width, height, initial_value=CLOSED)
+    def init(self, width: int, height: int, count_mines: int):
+        super().init(width, height, initial_value=CLOSED)
         self._count_mines = count_mines
         self._status = Status.NOT_INITIALIZED
-        self._show_mines = True  # TODO: вернуть на False
+        self._show_mines = False
         self._no_mines = self._width * self._height - count_mines
         font = pg.font.Font(None, round(self._cell_size * 1.2))
         self._DIGITS = [
@@ -43,13 +45,24 @@ class Minesweeper(Board):
                 'black', 'blue', 'green', 'orange', 'black', 'darkviolet', 'saddlebrown', 'maroon', 'red'
             ])
         ]
+        self._IMAGE_BOMB = pg.transform.smoothscale(
+            load_image('bomb.png'),
+            (self._cell_size, self._cell_size)
+        )
+        self._IMAGE_FLAG = pg.transform.smoothscale(
+            load_image('flag.png'),
+            (self._cell_size, self._cell_size)
+        )
+        self._double_click_clok
 
     def draw_cell(self, screen: pg.Surface, row: int, col: int, rect: pg.Rect) -> None:
         cell = self._board[row][col]
         if cell == MINE and self._show_mines:
-            pg.draw.rect(screen, 'red', rect)
-        elif cell == CLOSED or cell == MINE and not self._show_mines:
+            screen.blit(self._IMAGE_BOMB, rect.topleft)
+        elif cell % 100 == CLOSED or cell % 100 == MINE and not self._show_mines:
             pg.draw.rect(screen, '#505050', rect)
+            if cell // 100 == 1:
+                screen.blit(self._IMAGE_FLAG, rect.topleft)
         elif 0 < cell <= 8:
             digit = self._DIGITS[cell]
             screen.blit(digit, (
@@ -57,18 +70,31 @@ class Minesweeper(Board):
                 rect.centery - digit.get_height() // 2
             ))
 
-    def on_click(self, row: int, col: int) -> None:
-        if self._status == Status.WINNING or self._status == Status.LOSING:
-            return
-        if self._status == Status.NOT_INITIALIZED:
-            self._initial(row, col)
-        if self._board[row][col] == MINE:
-            self._lose()
-        if self._board[row][col] == CLOSED:
-            self._no_mines -= 1
-            self._board[row][col] = self._get_neighbours(row, col)
-            if self._no_mines == 0:
-                self._win()
+        def on_click(self, row: int, col: int) -> None:
+            if row < 0 or col < 0 or row >= self._height or col >= self._width:
+                return
+            if self._status == Status.WINNING or self._status == Status.LOSING:
+                return
+            if self._status == Status.NOT_INITIALIZED:
+                self._initial(row, col)
+            cell = self._board[row][col]
+            if 0 <= cell <= 8:
+                return
+            elif cell == MINE:
+                self._lose()
+            elif cell == CLOSED:
+                self._no_mines -= 1
+                self._board[row][col] = self._get_neighbours(row, col)
+                if self._board[row][col] == 0:
+                    self._open_neigbouts(row, col)
+                if self._no_mines == 0:
+                    self._win()
+
+    def _open_neigbouts(self, row: int, col: int) -> None:
+        for x in range(col - 1, col + 2):
+            for y in range(row - 1, row + 2):
+                if x != col or y != row:
+                   self.on_click(y, x)
 
     def _get_neighbours(self, row: int, col: int) -> int:
         result = 0
@@ -79,21 +105,44 @@ class Minesweeper(Board):
         return result
 
     def _win(self) -> None:
-        self._status = Status.WINNING
-        print('win')
+            self._status = Status.WINNING
+            print('win')
 
     def _lose(self) -> None:
-        self._status = Status.LOSING
-        self._show_mines = True
-        print('lose')
+            self._status = Status.LOSING
+            self._show_mines = True
+            print('lose')
 
     def _initial(self, row: int, col: int) -> None:
-        self._status = Status.PLAYING
-        n = 0
-        assert self._count_mines < self._width * self._height
-        while n < self._count_mines:
-            x = random.randrange(self._width)
-            y = random.randrange(self._height)
-            if (y, x) != (row, col) and self._board[y][x] == CLOSED:
-                self._board[y][x] = MINE
-                n += 1
+            self._status = Status.PLAYING
+            n = 0
+            assert self._count_mines < self._width * self._height
+            while n < self._count_mines:
+                x = random.randrange(self._width)
+                y = random.randrange(self._height)
+                if (y, x) != (row, col) and self._board[y][x] == CLOSED:
+                    self._board[y][x] = MINE
+                    n += 1
+
+    def handle_event(self, event: pg.event.Event) -> None:
+            if event.type == pg.MOUSEBUTTONDOWN:
+                coord = self.get_at(*event.pos)
+                if coord:
+                    if event.button == 1:
+                        self.on_click(*coord)
+                    elif event.button == 3:
+                        self.on_right_click(*coord)
+                    else:
+                        self.on_click(*coord)
+
+    def on_right_click(self, row: int, col: int) -> None:
+            if self._status == Status.WINNING or self._status == Status.LOSING:
+                return
+            if self._status == Status.NOT_INITIALIZED:
+                return
+            if self._board[row][col] in (CLOSED, MINE):
+                self._board[row][col] += 100
+            elif self._board[row][col] // 100 == 1:
+                self._board[row][col] += 100
+            elif self._board[row][col] // 100 == 2:
+                self._board[row][col] -= 200
